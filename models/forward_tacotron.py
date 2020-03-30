@@ -8,6 +8,7 @@ import torch
 import torch.nn.functional as F
 
 from models.tacotron import CBHG
+from utils.display import time_it
 
 
 class LengthRegulator(nn.Module):
@@ -28,7 +29,7 @@ class LengthRegulator(nn.Module):
         for i in range(tot_duration.shape[0]):
             pos = 0
             for j in range(tot_duration.shape[1]):
-                pos1 = tot_duration[i, j]
+                pos1 = tot_duration[i, j, 0]
                 index[i, pos:pos1, :] = j
                 pos = pos1
             index[i, pos:, :] = j
@@ -147,6 +148,7 @@ class ForwardTacotron(nn.Module):
         x = self.pad(x, mel.size(2))
         return x, x_post, dur_hat
 
+    @time_it
     def generate(self, x, alpha=1.0):
         self.eval()
         device = next(self.parameters()).device  # use same device as parameters
