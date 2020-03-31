@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Union
+from typing import Union, List, Optional
 
 import torch.nn as nn
 import torch
@@ -13,16 +13,18 @@ class LengthRegulator(nn.Module):
     def __init__(self):
         super().__init__()
 
-    def forward(self, x, dur):
-        output = []
+    def forward(self, x: torch.Tensor, dur: torch.Tensor):
+        #print('x', type(x))
+        #print('dur', type(dur))
+        output : List[torch.Tensor] = []
         for x_i, dur_i in zip(x, dur):
             expanded = self.expand(x_i, dur_i)
             output.append(expanded)
         output = self.pad(output)
         return output
 
-    def expand(self, x, dur):
-        output = []
+    def expand(self, x: torch.Tensor, dur: torch.Tensor):
+        output : List[torch.Tensor] = []
         for i, frame in enumerate(x):
             expanded_len = int(dur[i] + 0.5)
             expanded = frame.expand(expanded_len, -1)
@@ -30,8 +32,8 @@ class LengthRegulator(nn.Module):
         output = torch.cat(output, 0)
         return output
 
-    def pad(self, x):
-        output = []
+    def pad(self, x: List[torch.Tensor]):
+        output : List[torch.Tensor] = []
         max_len = max([x[i].size(0) for i in range(len(x))])
         for i, seq in enumerate(x):
             padded = F.pad(seq, [0, 0, 0, max_len - seq.size(0)], 'constant', 0.0)
@@ -52,7 +54,9 @@ class DurationPredictor(nn.Module):
         self.rnn = nn.GRU(conv_dims, rnn_dims, batch_first=True, bidirectional=True)
         self.lin = nn.Linear(2 * rnn_dims, 1)
 
-    def forward(self, x, alpha=1.0):
+    #def forward(self, x, alpha=1.0):
+    def forward(self, x):
+        alpha = 1.0
         x = x.transpose(1, 2)
         for conv in self.convs:
             x = conv(x)
@@ -65,7 +69,7 @@ class DurationPredictor(nn.Module):
 
 class BatchNormConv(nn.Module):
 
-    def __init__(self, in_channels, out_channels, kernel, activation=None):
+    def __init__(self, in_channels, out_channels, kernel, activation):
         super().__init__()
         self.conv = nn.Conv1d(in_channels, out_channels, kernel, stride=1, padding=kernel // 2, bias=False)
         self.bnorm = nn.BatchNorm1d(out_channels)
@@ -73,8 +77,14 @@ class BatchNormConv(nn.Module):
 
     def forward(self, x):
         x = self.conv(x)
-        if self.activation:
-            x = self.activation(x)
+        if torch.jit.is_scripting():
+            print("bora")
+        #else:
+        #    print('activation', self.activation)
+        #if self.activation:
+        #    x = self.activation(x)
+
+        x = torch.relu(x)
         x = self.bnorm(x)
         return x
 
@@ -121,8 +131,9 @@ class ForwardTacotron(nn.Module):
         self.dropout = dropout
         self.post_proj = nn.Linear(2 * postnet_dims, n_mels, bias=False)
 
+    @torch.jit.unused
     def forward(self, x, mel, dur):
-        self.train()
+        #self.train()
         self.step += 1
 
         x = self.embedding(x)
@@ -153,7 +164,7 @@ class ForwardTacotron(nn.Module):
         x = torch.as_tensor(x, dtype=torch.long, device=device).unsqueeze(0)
 
         x = self.embedding(x)
-        dur = self.dur_pred(x, alpha=alpha)
+        dur = self.dur_pred(x) # , alpha=alpha)
 
         x = x.transpose(1, 2)
         x = self.prenet(x)
@@ -174,7 +185,9 @@ class ForwardTacotron(nn.Module):
         return x_post
 
     def pad(self, x, max_len):
+        print('pad', type(x))
         x = x[:, :, :max_len]
+        print('pad0', type(x))
         x = F.pad(x, [0, max_len - x.size(2), 0, 0], 'constant', 0.0)
         return x
 

@@ -8,13 +8,17 @@ from utils.dsp import reconstruct_waveform
 from utils import hparams as hp
 import numpy as np
 
+if torch.cuda.is_available():
+    device = torch.device('cuda')
+else:
+    device = torch.device('cpu')
+
 
 def init_hparams(hp_file):
     hp.configure(hp_file)
 
 
 def get_forward_model(model_path):
-    device = torch.device('cuda')
     model = ForwardTacotron(embed_dims=hp.forward_embed_dims,
                             num_chars=len(symbols),
                             durpred_rnn_dims=hp.forward_durpred_rnn_dims,
@@ -32,7 +36,6 @@ def get_forward_model(model_path):
 
 
 def get_wavernn_model(model_path):
-    device = torch.device('cuda')
     print()
     model = WaveRNN(rnn_dims=hp.voc_rnn_dims,
                     fc_dims=hp.voc_fc_dims,
@@ -53,7 +56,19 @@ def get_wavernn_model(model_path):
 
 def synthesize(input_text, tts_model, voc_model, alpha=1.0):
     x = text_to_sequence(input_text.strip(), ['english_cleaners'])
+
     m = tts_model.generate(x, alpha=alpha)
+    
+    #print("type(x) = ", type(x))
+    #for i in x:
+    #    print("type(x[i]) = ", type(i))
+        
+    print("tracing...")
+    #traced = torch.jit.script(tts_model)
+    traced = torch.jit.trace(tts_model, x)
+    print(traced)
+    traced.save("tts_model.zip")
+
     # Fix mel spectrogram scaling to be from 0 to 1
     m = (m + 4) / 8
     np.clip(m, 0, 1, out=m)
