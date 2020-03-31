@@ -21,16 +21,15 @@ class LengthRegulator(nn.Module):
      
     @staticmethod
     def build_index(duration, x):
-        duration[duration<0]=0
+        duration[duration < 0] = 0
         tot_duration = duration.cumsum(1).detach().cpu().numpy().astype('int')
         max_duration = int(tot_duration.max().item())
         index = np.zeros([x.shape[0], max_duration, x.shape[2]], dtype='long')
-
         for i in range(tot_duration.shape[0]):
             pos = 0
             for j in range(tot_duration.shape[1]):
                 pos1 = tot_duration[i, j, 0]
-                index[i, pos:pos1, :] = j
+                index[i, pos:pos1, :] = j   
                 pos = pos1
             index[i, pos:, :] = j
         return torch.LongTensor(index).to(duration.device)
@@ -53,6 +52,7 @@ class DurationPredictor(nn.Module):
         self.rnn = nn.GRU(conv_dims, rnn_dims, batch_first=True, bidirectional=True)
         self.lin = nn.Linear(2 * rnn_dims, 1)
 
+    @time_it
     def forward(self, x, alpha=1.0):
         x = x.transpose(1, 2)
         for conv in self.convs:
