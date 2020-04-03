@@ -13,9 +13,7 @@ class LengthRegulator(nn.Module):
     def __init__(self):
         super().__init__()
 
-    def forward(self, x: torch.Tensor, dur: torch.Tensor):
-        #print('x', type(x))
-        #print('dur', type(dur))
+    def forward(self, x: torch.Tensor, dur):
         output : List[torch.Tensor] = []
         for x_i, dur_i in zip(x, dur):
             expanded = self.expand(x_i, dur_i)
@@ -23,11 +21,17 @@ class LengthRegulator(nn.Module):
         output = self.pad(output)
         return output
 
-    def expand(self, x: torch.Tensor, dur: torch.Tensor):
+    def expand(self, x: torch.Tensor, dur):
         output : List[torch.Tensor] = []
         for i, frame in enumerate(x):
+            print("dur[i] = ", dur[i])
+            # TODO(syoyo): Invalid input sequence may generate negative value. Remove assertion in production.
+            assert dur[i] > 0.0
             expanded_len = int(dur[i] + 0.5)
+            print("expanded_len = ", expanded_len)
+            print("frame.dim = ", frame.shape, expanded_len)
             expanded = frame.expand(expanded_len, -1)
+            print("expanded.dim = ", expanded.shape)
             output.append(expanded)
         output = torch.cat(output, 0)
         return output
@@ -77,13 +81,14 @@ class BatchNormConv(nn.Module):
 
     def forward(self, x):
         x = self.conv(x)
-        if torch.jit.is_scripting():
-            print("bora")
+        #if torch.jit.is_scripting():
+        #    print("bora")
         #else:
         #    print('activation', self.activation)
         #if self.activation:
         #    x = self.activation(x)
 
+        # activation is always relu, so hardcode it.
         x = torch.relu(x)
         x = self.bnorm(x)
         return x
@@ -131,14 +136,43 @@ class ForwardTacotron(nn.Module):
         self.dropout = dropout
         self.post_proj = nn.Linear(2 * postnet_dims, n_mels, bias=False)
 
-    @torch.jit.unused
-    def forward(self, x, mel, dur):
-        #self.train()
-        self.step += 1
+    #def forward(self, x, mel, dur):
+    #    #if not torch.jit.is_scripting():
+    #    #    raise "error"
 
+    #    #self.train()
+    #    self.step += 1
+
+    #    x = self.embedding(x)
+    #    dur_hat = self.dur_pred(x)
+    #    dur_hat = dur_hat.squeeze()
+
+    #    x = x.transpose(1, 2)
+    #    x = self.prenet(x)
+    #    x = self.lr(x, dur)
+    #    x, _ = self.lstm(x)
+    #    x = F.dropout(x,
+    #                  p=self.dropout,
+    #                  training=self.training)
+    #    x = self.lin(x)
+    #    x = x.transpose(1, 2)
+
+    #    x_post = self.postnet(x)
+    #    x_post = self.post_proj(x_post)
+    #    x_post = x_post.transpose(1, 2)
+
+    #    x_post = self.pad(x_post, mel.size(2))
+    #    x = self.pad(x, mel.size(2))
+    #    return x, x_post, dur_hat
+
+    def forward(self, x : torch.Tensor):
+        # x : Tensor with long type, [batch, N]
+        #device = torch.device('cpu')
+        #x = torch.as_tensor(x, dtype=torch.long, device=device).unsqueeze(0)
+
+        print("fwd x", x.dtype, x.shape)
         x = self.embedding(x)
-        dur_hat = self.dur_pred(x)
-        dur_hat = dur_hat.squeeze()
+        dur = self.dur_pred(x)
 
         x = x.transpose(1, 2)
         x = self.prenet(x)
@@ -154,17 +188,20 @@ class ForwardTacotron(nn.Module):
         x_post = self.post_proj(x_post)
         x_post = x_post.transpose(1, 2)
 
-        x_post = self.pad(x_post, mel.size(2))
-        x = self.pad(x, mel.size(2))
-        return x, x_post, dur_hat
+        x_post = x_post.squeeze()
+        #x_post = x_post.cpu().data.numpy()
+        return x_post
 
+    @torch.jit.unused
     def generate(self, x, alpha=1.0):
         self.eval()
         device = next(self.parameters()).device  # use same device as parameters
         x = torch.as_tensor(x, dtype=torch.long, device=device).unsqueeze(0)
 
+        print("fwd x", x.dtype, x.shape)
+
         x = self.embedding(x)
-        dur = self.dur_pred(x) # , alpha=alpha)
+        dur = self.dur_pred(x) #, alpha=alpha)
 
         x = x.transpose(1, 2)
         x = self.prenet(x)
@@ -182,13 +219,13 @@ class ForwardTacotron(nn.Module):
 
         x_post = x_post.squeeze()
         x_post = x_post.cpu().data.numpy()
+        print(x_post.dtype, x_post.shape)
         return x_post
 
-    def pad(self, x, max_len):
-        print('pad', type(x))
+    def pad(self, x, max_len: int):
         x = x[:, :, :max_len]
-        print('pad0', type(x))
-        x = F.pad(x, [0, max_len - x.size(2), 0, 0], 'constant', 0.0)
+        sz: int = max_len - x.size(2)
+        x = F.pad(x, [0, sz, 0, 0], 'constant', 0.0)
         return x
 
     def get_step(self):
