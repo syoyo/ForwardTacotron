@@ -57,17 +57,22 @@ def get_wavernn_model(model_path):
 def synthesize(input_text, tts_model, voc_model, alpha=1.0):
     x = text_to_sequence(input_text.strip(), ['english_cleaners'])
 
+    print(x)
+
+    #print('x', len(x))
     m = tts_model.generate(x, alpha=alpha)
+
+    #np.savetxt("ref_output.mel", m) 
     
     #print("type(x) = ", type(x))
     #for i in x:
     #    print("type(x[i]) = ", type(i))
         
-    print("tracing...")
+    #print("tracing...")
     #traced = torch.jit.script(tts_model)
-    traced = torch.jit.trace(tts_model, x)
-    print(traced)
-    traced.save("tts_model.zip")
+    #traced = torch.jit.trace(tts_model, x)
+    #print(traced)
+    #traced.save("tts_model.zip")
 
     # Fix mel spectrogram scaling to be from 0 to 1
     m = (m + 4) / 8
