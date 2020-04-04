@@ -54,10 +54,9 @@ class LengthRegulator(nn.Module):
      
     @staticmethod
     def build_index(duration, x):
-        #print('dur', type(duration))
-        #print('x', type(x))
         duration[duration<0]=0
-        tot_duration = duration.cumsum(1).detach().cpu().numpy().astype('int')
+        tot_duration = duration.cumsum(1).detach().cpu().numpy()
+        tot_duration = tot_duration.astype('int')
         max_duration = int(tot_duration.max().item())
         index = np.zeros([x.shape[0], max_duration, x.shape[2]], dtype='long')
 
@@ -70,8 +69,28 @@ class LengthRegulator(nn.Module):
             index[i, pos:, :] = j
         return torch.LongTensor(index).to(duration.device)
 
-    def expand(self, x, dur):
-        idx = self.build_index(dur, x)
+    def expand(self, x: torch.Tensor, dur: torch.Tensor):
+
+        # pure torch version of `build_index`
+        dur = torch.clamp(dur, min=0) # dur[dur<0]=0
+        tot_duration = dur.cumsum(1).detach().cpu()
+        # float -> int
+        tot_duration.int()
+        max_duration = int(tot_duration.max().item())
+        idx = torch.zeros([x.shape[0], max_duration, x.shape[2]], dtype=torch.long)
+
+        for i in range(tot_duration.shape[0]):
+            pos = 0
+            for j in range(tot_duration.shape[1]):
+                # Explicitly cast to int type
+                pos1 = int(tot_duration[i, j])
+                idx[i, pos:pos1, :] = j
+                pos = pos1
+            idx[i, pos:, :] = tot_duration.shape[1] - 1
+
+        # original version
+        #idx = self.build_index(dur, x)
+        
         y = torch.gather(x, 1, idx)
         return y
 
@@ -92,9 +111,15 @@ class DurationPredictor(nn.Module):
     def forward(self, x):
         alpha = 1.0
         x = x.transpose(1, 2)
+
+        if torch.jit.is_scripting():
+            training = False
+        else:
+            training = self.training
+
         for conv in self.convs:
             x = conv(x)
-            x = F.dropout(x, p=0.1, training=self.training)
+            x = F.dropout(x, p=0.1, training=training)
         x = x.transpose(1, 2)
         x, _ = self.rnn(x)
         x = self.lin(x)
@@ -200,7 +225,13 @@ class ForwardTacotron(nn.Module):
         #device = torch.device('cpu')
         #x = torch.as_tensor(x, dtype=torch.long, device=device).unsqueeze(0)
 
-        print("fwd x", x.dtype, x.shape)
+        #print("fwd x", x.dtype, x.shape)
+
+        if torch.jit.is_scripting():
+            training = False
+        else:
+            training = self.training
+        
         x = self.embedding(x)
         dur = self.dur_pred(x)
 
@@ -210,7 +241,7 @@ class ForwardTacotron(nn.Module):
         x, _ = self.lstm(x)
         x = F.dropout(x,
                       p=self.dropout,
-                      training=self.training)
+                      training=training)
         x = self.lin(x)
         x = x.transpose(1, 2)
 
@@ -228,7 +259,7 @@ class ForwardTacotron(nn.Module):
         device = next(self.parameters()).device  # use same device as parameters
         x = torch.as_tensor(x, dtype=torch.long, device=device).unsqueeze(0)
 
-        print("fwd x", x.dtype, x.shape)
+        #print("fwd x", x.dtype, x.shape)
 
         x = self.embedding(x)
         dur = self.dur_pred(x) #, alpha=alpha)
@@ -250,7 +281,7 @@ class ForwardTacotron(nn.Module):
 
         x_post = x_post.squeeze()
         x_post = x_post.cpu().data.numpy()
-        print(x_post.dtype, x_post.shape)
+        #print(x_post.dtype, x_post.shape)
         return x_post
 
     def pad(self, x, max_len: int):
